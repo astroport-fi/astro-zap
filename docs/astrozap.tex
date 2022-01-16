@@ -1,0 +1,127 @@
+\documentclass{article}
+
+\usepackage{arxiv}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsmath}        % align equations
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{lipsum}
+\usepackage{graphicx}
+
+\title{AstroZap}
+
+\author{
+ larry \\
+ Delphi Labs \\
+ \texttt{larry@delphidigital.io}
+}
+
+\begin{document}
+\maketitle
+
+\section{Derivation}
+
+Consider two assets $A$ and $B$. An xy-k liquidity pool contains the two assets of amounts $A_{\mathrm{pool}}$ and $B_{\mathrm{pool}}$, respectively, and a liquidity token with the total supply of $L_{\mathrm{total}}$. A user wishes to enter the pool with $A_{\mathrm{user}}$ and $B_{\mathrm{user}}$. 
+
+The amount of liquidity tokens that will be minted to the user is calculated as
+
+\begin{align}
+L_{\mathrm{mint}} = L_{\mathrm{total}} \cdot \min \left( \frac{A_{\mathrm{user}}}{A_{\mathrm{pool}}}, \frac{B_{\mathrm{user}}}{B_{\mathrm{pool}}}  \right)
+\end{align}
+
+Without lose of generality, let us assume $A_{\mathrm{user}} / A_{\mathrm{pool}} > B_{\mathrm{user}} / B_{\mathrm{pool}}$. In order to maximize $L_{\mathrm{mint}}$, we need to swap some amounts of $A$ into $B$. Assume we offer $A_{\mathrm{offer}}$ for the swap, then the pre-commission return amount is $B_{\mathrm{return}}$ is calculated by 
+
+\begin{align}
+A_{\mathrm{pool}} B{_\mathrm{pool}} = \left( A_{\mathrm{pool}} + A_{\mathrm{offer}} \right) \left( B_{\mathrm{pool}} - B_{\mathrm{return}} \right)
+\end{align} 
+
+Assume the commission rate is $r$ ($0 < r < 1$); after the swap, the pool has $A'_{\mathrm{pool}}$, $B'_{\mathrm{pool}}$, and the user has $A'_{\mathrm{user}}$, $B'_{\mathrm{user}}$. The relation of the these variables are described by
+
+\begin{align}
+A'_{\mathrm{pool}} &= A_{\mathrm{pool}} + A_{\mathrm{offer}} \\
+B'_{\mathrm{pool}} &= B_{\mathrm{pool}} - (1-r) B_{\mathrm{return}} \\
+A'_{\mathrm{user}} &= A_{\mathrm{user}} - A_{\mathrm{offer}} \\
+B'_{\mathrm{user}} &= B_{\mathrm{user}} + (1-r) B_{\mathrm{return}}
+\end{align}
+
+It is not hard to see that $L_{\mathrm{mint}}$ is maximized when
+
+\begin{align}
+\frac{A'_{\mathrm{user}}}{A'_{\mathrm{pool}}} = \frac{B'_{\mathrm{user}}}{B'_{\mathrm{pool}}}
+\end{align}
+
+Combine (2) -- (7), we arrive at the quadratic equation
+
+\begin{align}
+a A^2_{\mathrm{offer}} + b A_{\mathrm{offer}} + c = 0
+\end{align}
+
+where
+
+\begin{align}
+a &= B_{\mathrm{pool}} + B_{\mathrm{user}} \\
+b &= 2 A_{\mathrm{pool}} (B_{\mathrm{pool}} + B_{\mathrm{user}}) - r B_{\mathrm{pool}} (A_{\mathrm{pool}} + A_{\mathrm{user}}) \\
+c &= A_{\mathrm{pool}} (A_{\mathrm{pool}} B_{\mathrm{user}} - A_{\mathrm{user}} B_{\mathrm{pool}})
+\end{align}
+
+In the Astrozap implementation, we use Newton's method to solve the above equation and find $A_{\mathrm{offer}}$.
+
+\section{Example}
+
+Astroport LUNA-UST pool has 120,911,368,717,323 \texttt{uusd} and 1,410,005,459,618 \texttt{uluna}, and a commission rate of 0.3\%. User wishes to enter asymmetrically with 100,000,000,000 \texttt{uusd}.
+
+\begin{align*}
+a &= 1410005459618 + 0 \\
+  &= 1410005459618 \\
+b &= 2 \times 120911368717323 \times (1410005459618 + 0) - 0.003 \times 1410005459618 \times (120911368717323 + 100000000000) \\
+  &= 340459499970919150615924540 \\
+c &= 120911368717323 \times (120911368717323 \times 0 - 100000000000 \times 1410005459618) \\
+  &= -17048569002131048373356261400000000000
+\end{align*}
+
+Using an online Newton's method calculator,\footnote{\url{https://keisan.casio.com/exec/system/1244946907}} with 0 as the initial guess for $A_{\mathrm{offer}}$, convergence was reached after only 5 iterations with the solution of $A_{\mathrm{offer}}$ = 50,064,794,338 \texttt{uusd}, slightly more than half of the user's deposit.
+
+The return amount, before commission, is\footnote{The function \texttt{computeXykSwapOutput} is implemented in TypeScript at \url{https://github.com/mars-protocol/fields-of-mars/blob/master/scripts/cfmm.ts#L10}}
+
+\begin{align*}
+B_{\mathrm{return}} 
+  &= \mathtt{computeXykSwapOutput}(A_{\mathrm{offer}}, A_{\mathrm{pool}}, B_{\mathrm{pool}}) \\
+  &= \mathtt{computeXykSwapOutput}(50064794338, 120911368717323, 1410005459618) \\
+  &= 583587936 \ (\mathtt{uluna})
+\end{align*}
+
+The user's and the pool's asset balances after the swap are
+
+\begin{align*}
+A'_{\mathrm{pool}} 
+  &= 120911368717323 + 50064794338 \\
+  &= 120911952305259 \\
+B'_{\mathrm{pool}} 
+  &= 1410005459618 - (1 - 0.003) \times 583587936 \\
+  &= 1409423622445 \\
+A'_{\mathrm{user}} 
+  &= 100000000000 - 50064794338 \\
+  &= 49935205662 \\
+B'_{\mathrm{user}} 
+  &= 0 + (1 - 0.003) \times 583587936 \\
+  &= 581837173
+\end{align*}
+
+The user's shares in the pool:
+
+\begin{align*}
+\frac{A'_{\mathrm{user}}}{A'_{\mathrm{pool}}} 
+  &= 49935205662 \div 120911952305259 = 0.000412988 \\
+\frac{B'_{\mathrm{user}}}{B'_{\mathrm{pool}}}
+  &= 581837173 \div 1409423622445 = 0.000412819
+\end{align*}
+
+Which are indeed very close (only 0.04\% difference.)
+
+\end{document}
