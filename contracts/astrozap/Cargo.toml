@@ -28,3 +28,7 @@ cw-storage-plus = "0.9.1"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+# We use `compute_swap` function from the pair contract in our mock querier
+astroport-pair = { git = "https://github.com/astroport-fi/astroport-core", tag = "v1.0.0" }
