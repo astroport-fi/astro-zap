@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::str::FromStr;
 
 use cosmwasm_std::{
@@ -12,10 +11,10 @@ use cw_asset::{Asset, AssetInfo, AssetList};
 
 use crate::helpers::{
     build_provide_liquidity_submsgs, build_swap_submsg, event_contains_attr, handle_deposits,
-    query_pair, query_pool, query_simulation, unwrap_reply,
+    query_pair, query_pool, query_simulation, unwrap_reply, bigint_to_uint128
 };
-use crate::math::Equation;
-use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, SimulateResponse};
+use crate::math::Quadratic;
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, SimulateEnterResponse};
 use crate::state::{CacheData, CACHE};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -81,20 +80,11 @@ fn enter(
 
     // Compute the optimal swap that will yield the most liquidity tokens, and deduct the amount
     // that will be sent out from available assets
+    // Then, deduct the offer asset from the user's available assets (as they will be sent out)
     let offer_asset = compute_offer_asset(&pool_assets, &deposits)?;
-
-    // If no swap is needed (i.e. offer amount is calculated to be zero), we simply provide the
-    // liquidity
-    if offer_asset.amount.is_zero() {
-        return Ok(Response::new()
-            .add_messages(deposit_msgs)
-            .add_submessages(build_provide_liquidity_submsgs(&pair_addr, &deposits)?)
-            .add_attribute("action", "astrozap/execute/enter")
-            .add_attribute("assets_deposited", deposits.to_string())
-            .add_attribute("assets_provided", deposits.to_string()));
-    }
-    // Cache necessary data so that they can be accessed when handling reply
     deposits.deduct(&offer_asset)?;
+
+    // Cache necessary data so that they can be accessed when handling reply
     let cache = CacheData {
         user_addr: info.sender,
         pair_addr: pair_addr.clone(),
@@ -104,26 +94,38 @@ fn enter(
     };
     CACHE.save(deps.storage, &cache)?;
 
-    // Execute the swap
+    // If no swap is needed (i.e. offer amount is calculated to be zero), we simply provide the
+    // liquidity; else, we execute the swap
     //
     // NOTE: We will do slippage check against `minimum_received` in the end, so no need to provide
     // slippage-related parameters here
-    Ok(Response::new()
-        .add_messages(deposit_msgs)
-        .add_submessage(build_swap_submsg(&pair_addr, &offer_asset)?)
-        .add_attribute("action", "astrozap/execute/enter")
-        .add_attribute("assets_deposited", deposits.to_string())
-        .add_attribute("asset_offered", offer_asset.to_string()))
+    let res = if offer_asset.amount.is_zero() {
+        Response::new()
+            .add_messages(deposit_msgs)
+            .add_submessages(build_provide_liquidity_submsgs(&pair_addr, &deposits)?)
+            .add_attribute("action", "astrozap/execute/enter")
+            .add_attribute("assets_deposited", deposits.to_string())
+            .add_attribute("asset_offered", "none")
+            .add_attribute("assets_provided", deposits.to_string())
+    } else {
+        Response::new()
+            .add_messages(deposit_msgs)
+            .add_submessage(build_swap_submsg(&pair_addr, &offer_asset)?)
+            .add_attribute("action", "astrozap/execute/enter")
+            .add_attribute("assets_deposited", deposits.to_string())
+            .add_attribute("asset_offered", offer_asset.to_string())
+            .add_attribute("assets_provided", "none")
+    };
+
+    Ok(res)
 }
 
 /// Assert the given Astroport pair is of the XYK type
 fn assert_pair_type(pair_type: &PairType) -> StdResult<()> {
-    if matches!(pair_type, PairType::Xyk {}) {
-        return Err(StdError::generic_err(
-            format!("unsupported pair type: {}", pair_type.to_string())
-        ));
-    }
-    Ok(())
+     match pair_type {
+         PairType::Xyk {} => Ok(()),
+         pt => Err(StdError::generic_err(format!("unsupported pair type: {}", pt.to_string()))),
+     }
 }
 
 /// Assert each of the deposited asset must be contained by the Astroport pair
@@ -171,28 +173,27 @@ fn compute_offer_asset(pool_assets: &AssetList, user_assets: &AssetList) -> StdR
     let share_a = Decimal256::from_ratio(a_user.amount, a_pool.amount);
     let share_b = Decimal256::from_ratio(b_user.amount, b_pool.amount);
 
-    let qe = if share_a > share_b {
-        Equation::from_assets(
-            a_user.amount.into(),
-            a_pool.amount.into(),
-            b_user.amount.into(),
-            b_pool.amount.into(),
-        )?
+    let q = if share_a > share_b {
+        Quadratic::from_asset_amounts(
+            &a_user.amount.u128().into(),
+            &a_pool.amount.u128().into(),
+            &b_user.amount.u128().into(),
+            &b_pool.amount.u128().into(),
+        )
     } else {
-        Equation::from_assets(
-            b_user.amount.into(),
-            b_pool.amount.into(),
-            a_user.amount.into(),
-            a_pool.amount.into(),
-        )?
+        Quadratic::from_asset_amounts(
+            &b_user.amount.u128().into(),
+            &b_pool.amount.u128().into(),
+            &a_user.amount.u128().into(),
+            &a_pool.amount.u128().into(),
+        )
     };
 
     // Solve quadratic equation to find out the swap amount
     //
     // Here we use 0 as the initial value. It is possible to find a better guess, but in experience
     // the equation usually converges in 4 - 5 iterations even starting with 0, so I'll go with this
-    let offer_amount_512 = qe.solve(Uint128::zero().into())?;
-    let offer_amount: Uint128 = offer_amount_512.try_into()?;
+    let offer_amount = bigint_to_uint128(&q.solve())?;
 
     let offer_asset_info = if share_a > share_b {
         a_pool.info.clone()
@@ -206,8 +207,8 @@ fn compute_offer_asset(pool_assets: &AssetList, user_assets: &AssetList) -> StdR
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, reply: Reply) -> StdResult<Response> {
     match reply.id {
-        0 => after_swap(deps, unwrap_reply(reply)?),
-        1 => after_provide_liquidity(deps, unwrap_reply(reply)?),
+        1 => after_swap(deps, unwrap_reply(reply)?),
+        2 => after_provide_liquidity(deps, unwrap_reply(reply)?),
         id => Err(StdError::generic_err(format!("invalid reply id: {}", id))),
     }
 }
@@ -310,7 +311,7 @@ fn query_simulate_enter(
     deps: Deps,
     pair_addr: Addr,
     mut deposits: AssetList,
-) -> StdResult<SimulateResponse> {
+) -> StdResult<SimulateEnterResponse> {
     let pair_info = query_pair(&deps.querier, &pair_addr)?;
     let pool_info = query_pool(&deps.querier, &pair_addr)?;
     let mut pool_assets = AssetList::from_legacy(&pool_info.assets);
@@ -331,10 +332,7 @@ fn query_simulate_enter(
     } else {
         pool_assets[0].info.clone()
     };
-    let return_asset = Asset::new(
-        return_info,
-        simulation.return_amount - simulation.commission_amount,
-    );
+    let return_asset = Asset::new(return_info, simulation.return_amount);
 
     pool_assets.add(&offer_asset)?;
     pool_assets.deduct(&return_asset)?;
@@ -356,7 +354,7 @@ fn query_simulate_enter(
             .multiply_ratio(pool_info.total_share, pool_assets[1].amount),
     );
 
-    Ok(SimulateResponse {
+    Ok(SimulateEnterResponse {
         offer_asset: offer_asset.into(),
         return_asset: return_asset.into(),
         mint_shares,

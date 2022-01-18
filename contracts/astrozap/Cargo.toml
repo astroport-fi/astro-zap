@@ -19,13 +19,11 @@ overflow-checks = true
 
 [dependencies]
 astroport = "0.3.1"
-
-cw-asset = { version = "0.3.4", features = ["legacy"] }
-
 cosmwasm-std = "0.16.0"
 cw20 = "0.9.1"
+cw-asset = { version = "0.3.4", features = ["legacy"] }
 cw-storage-plus = "0.9.1"
-
+num-bigint = "0.4"
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 

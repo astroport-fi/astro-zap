@@ -39,7 +39,7 @@ pub enum QueryMsg {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct SimulateResponse {
+pub struct SimulateEnterResponse {
     /// The asset that will be offered for swap in order to balance the values or the two assets
     pub offer_asset: AssetUnchecked,
     /// The asset that will be returned as the result of swapping `offer_asset`

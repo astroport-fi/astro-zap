@@ -1,13 +1,36 @@
 use cosmwasm_std::{
     to_binary, Addr, Coin, CosmosMsg, Event, QuerierWrapper, QueryRequest, Reply, StdError,
-    StdResult, SubMsg, SubMsgExecutionResponse, WasmMsg, WasmQuery,
+    StdResult, SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg, WasmQuery,
 };
 use cw20::Cw20ExecuteMsg;
+
+use num_bigint::{BigInt, BigUint};
 
 use cw_asset::{Asset, AssetInfo, AssetList};
 
 use astroport::asset::PairInfo;
 use astroport::pair::{ExecuteMsg, PoolResponse, SimulationResponse};
+
+const POW_32: u128 = 2u128.pow(32);
+
+/// Convert a num_bigint::BigUint to cosmwasm_std::Uint128
+pub fn biguint_to_uint128(bui: &BigUint) -> StdResult<Uint128> {
+    let digits = bui.to_u32_digits();
+    let mut factor = Uint128::new(1u128);
+    let mut ui = Uint128::zero();
+    for i in 0..digits.len() {
+        ui = ui.checked_add(Uint128::new(digits[i].into()).checked_mul(factor)?)?;
+        factor = factor.checked_mul(Uint128::new(POW_32))?;
+    }
+    Ok(ui)
+}
+
+/// Convert a num_bigint::BigInt to cosmwasm_std::Uint128
+pub fn bigint_to_uint128(bi: &BigInt) -> StdResult<Uint128> {
+    biguint_to_uint128(
+        &bi.to_biguint().ok_or_else(|| StdError::generic_err(format!("big int is negative: {}", bi)))?
+    )
+}
 
 /// Extract response from reply
 pub fn unwrap_reply(reply: Reply) -> StdResult<SubMsgExecutionResponse> {
@@ -43,7 +66,7 @@ pub fn handle_deposit(
             })?;
             if sent_fund != claimed_deposit {
                 return Err(StdError::generic_err(
-                    format!("invalid deposit: expected {}, received {}", claimed_deposit, sent_fund)
+                    format!("invalid deposit: expected {}, received {}", claimed_deposit, sent_fund.amount)
                 ));
             }
             Ok(None)
@@ -100,10 +123,10 @@ pub fn query_simulation(
 
 /// Generate a submessage for swapping an asset using an Astroport pool
 ///
-/// NOTE: We use reply_id: 0
+/// NOTE: We use reply_id: 1
 pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<SubMsg> {
-    Ok(SubMsg::reply_on_success(
-        offer_asset.send_msg(
+    let msg = match &offer_asset.info {
+        AssetInfo::Cw20(_) => offer_asset.send_msg(
             pair_addr,
             to_binary(&astroport::pair::Cw20HookMsg::Swap {
                 belief_price: None,
@@ -111,13 +134,26 @@ pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<Sub
                 to: None,
             })?,
         )?,
-        0,
-    ))
+        AssetInfo::Native(denom) => CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: pair_addr.to_string(),
+            msg: to_binary(&ExecuteMsg::Swap {
+                offer_asset: offer_asset.clone().into(),
+                belief_price: None,
+                max_spread: None,
+                to: None,
+            })?,
+            funds: vec![Coin {
+                denom: denom.clone(),
+                amount: offer_asset.amount, // NOTE:
+            }],
+        }),
+    };
+    Ok(SubMsg::reply_on_success(msg, 1))
 }
 
 /// Generate submessages for providing liqudity to an Astroport pool
 ///
-/// NOTE: We use reply_id: 1
+/// NOTE: We use reply_id: 2
 pub fn build_provide_liquidity_submsgs(
     pair_addr: &Addr,
     assets: &AssetList,
@@ -154,7 +190,7 @@ pub fn build_provide_liquidity_submsgs(
             })?,
             funds,
         },
-        1,
+        2,
     ));
 
     Ok(submsgs)

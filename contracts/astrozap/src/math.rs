@@ -1,4 +1,4 @@
-use cosmwasm_std::{StdError, StdResult, Uint512};
+use num_bigint::BigInt;
 
 /// The maximum number of iterations to do when solving the quadratic equation
 const MAX_ITERATIONS: usize = 32;
@@ -8,13 +8,11 @@ const MAX_ITERATIONS: usize = 32;
 /// We can technically query the factory contract for this number, but this is, in my opinion,
 /// unnecessary and a waste of gas because the rate is almost never going to change. If it does
 /// change, we can always update this constant here and migrate the contract.
-const COMMISSION_RATA_BPS: u64 = 30;
+const COMMISSION_RATE_BPS: u64 = 30;
 
-/// Equation describing the relation between the optimal swap amount (x) and the asset amounts. It 
-/// is a quadratic equation of the form `a * x^2 + b * x - c = 0` where `a, b, c >= 0`. For details,
+/// Equation describing the relation between the optimal swap amount (x) and the asset amounts. It
+/// is a quadratic equation of the form `a * x^2 + b * x + c = 0` where `a, b, c >= 0`. For details,
 /// see the document `docs/astrozap.pdf`
-///
-/// For our use in AstroZap, `a, b, c > 0` should always hold. If not, them something is wrong.
 ///
 /// NOTE: Do we really need Uint512 or will Uint256 do? The maximum value we may reach is
 ///   (2^128 - 1)^3 ~= 1e+115
@@ -22,92 +20,107 @@ const COMMISSION_RATA_BPS: u64 = 30;
 ///   2^256 - 1 ~= 1e+77
 /// This being said, overflow should be very rare unless for pools with ultra-low-price shitcoins,
 /// and even in such cases we will safely return with error
-pub struct Equation {
+pub struct Quadratic {
     /// Coefficient of the quadratic term
-    pub a: Uint512,
+    pub a: BigInt,
     /// Coefficient of the linear term
-    pub b: Uint512,
+    pub b: BigInt,
     /// The constant term
-    pub c: Uint512,
+    pub c: BigInt,
 }
 
-impl Equation {
-    /// Create a new `Equation` instance using asset amounts defined in the `docs/astrozap.pdf`
-    pub fn from_assets(
-        offer_user: Uint512,
-        offer_pool: Uint512,
-        ask_user: Uint512,
-        ask_pool: Uint512,
-    ) -> StdResult<Self> {
-        let a = ask_pool.checked_add(ask_user)?;
+impl Quadratic {
+    /// Create a new quadratic equation instance using asset amounts defined in the `docs/astrozap.pdf`
+    pub fn from_asset_amounts(
+        offer_user: &BigInt,
+        offer_pool: &BigInt,
+        ask_user: &BigInt,
+        ask_pool: &BigInt,
+    ) -> Self {
+        let a = ask_pool + ask_user;
 
         // the 1st term of b
-        let b_1 = offer_pool
-            .checked_mul(a)?
-            .checked_mul(Uint512::from(2u128))?;
+        let b1 = offer_pool * &a * 2;
         // the 2nd term of b
-        let b_2 = ask_pool
-            .checked_mul(offer_pool.checked_add(offer_user)?)?
-            .checked_mul(Uint512::from(10000u128) - Uint512::from(COMMISSION_RATA_BPS))?
-            .checked_div(Uint512::from(10000u128))?;
+        let b2 = ask_pool * (offer_pool + offer_user) * COMMISSION_RATE_BPS / 10000;
         // combine the two terms
-        let b = b_1.checked_sub(b_2)?;
+        let b = b1 - b2;
 
-        let c = offer_pool.checked_mul(
-            offer_user
-                .checked_mul(ask_pool)?
-                .checked_sub(offer_pool.checked_mul(ask_user)?)?,
-        )?;
+        let c = offer_pool * (offer_pool * ask_user - offer_user * ask_pool);
 
-        Ok(Self { a, b, c })
+        Self { a, b, c }
     }
 
     /// Compute value of the function by the given x
     ///
-    /// f(x) = a * x * x + b * x - c
-    pub fn compute_value(&self, x: Uint512) -> StdResult<Uint512> {
-        self.a
-            .checked_mul(x)?
-            .checked_mul(x)?
-            .checked_add(self.b.checked_mul(x)?)?
-            .checked_sub(self.c)
-            .map_err(|overflow_err| StdError::overflow(overflow_err))
+    /// f(x) = a * x * x + b * x + c
+    pub fn compute_value(&self, x: &BigInt) -> BigInt {
+        &self.a * x * x + &self.b * x + &self.c
     }
 
     /// Compute value of the function by the given x
     ///
     /// f'(x) = 2 * a * x + b
-    pub fn compute_derivative_value(&self, x: Uint512) -> StdResult<Uint512> {
-        self.a
-            .checked_mul(x)?
-            .checked_mul(Uint512::from(2u128))?
-            .checked_add(self.b)
-            .map_err(|overflow_err| StdError::overflow(overflow_err))
+    pub fn compute_deriv_value(&self, x: &BigInt) -> BigInt {
+        2 * &self.a * x + &self.b
     }
 
-    /// Solve the quadratic equation `a * x^2 + b * x + c = 0` using Newton's method, with `x_init`
-    /// as the initial value
+    /// Solve the quadratic equation `a * x^2 + b * x + c = 0` using Newton's method
     ///
     /// If `MAX_ITERATION` is reached without convergence, we simply return the latest x value. The
     /// x value at this time does not represent the optimal swap amount, but it is fine because we
     /// will check slippage tolerance at the very end of the function call, so liquidity provisions
     /// with too big slippage will be reverted.
-    pub fn solve(&self, x_init: Uint512) -> StdResult<Uint512> {
-        let mut x_prev = x_init;
-        let mut x = x_prev;
+    /// 
+    /// Also, in practice, almost all such equations converge in 4 - 5 iterations.
+    pub fn solve(&self) -> BigInt {
+        let mut x_prev: BigInt = 0.into();
+        let mut x = x_prev.clone();
 
         // x_{n+1} = x_n - f(x_n) / f'(x_n)
         for _ in 0..MAX_ITERATIONS {
-            let val = self.compute_value(x_prev)?;
-            let deriv_val = self.compute_derivative_value(x_prev)?;
-            x = x_prev.checked_sub(val.checked_div(deriv_val)?)?;
+            let val = self.compute_value(&x_prev);
+            let deriv_val = self.compute_deriv_value(&x_prev);
+            x = &x_prev - val / deriv_val;
             if x == x_prev {
-                break
+                break;
             } else {
-                x_prev = x
+                x_prev = x.clone()
             }
         }
 
-        Ok(x)
+        x
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::helpers::bigint_to_uint128;
+    use cosmwasm_std::Uint128;
+
+    fn mock_equation() -> Quadratic {
+        Quadratic::from_asset_amounts(
+            &100000000000u128.into(),
+            &118070429547232u128.into(),
+            &0.into(),
+            &1451993415113u128.into(),
+        )
+    }
+
+    #[test]
+    fn should_create_from_asset_amounts() {
+        let qe = mock_equation();
+        assert_eq!(qe.a, BigInt::from(1451993415113u128));
+        assert_eq!(qe.b, BigInt::from(342360224387597541370186081u128));
+        assert_eq!(qe.c,BigInt::from(-17143748622214425401611721600000000000i128));
+    }
+
+    #[test]
+    fn should_solve_equation() {
+        let qe = mock_equation();
+        let offer_amount_bi = qe.solve();
+        let offer_amount = bigint_to_uint128(&offer_amount_bi).unwrap();
+        assert_eq!(offer_amount, Uint128::new(50064546170u128));
     }
 }
