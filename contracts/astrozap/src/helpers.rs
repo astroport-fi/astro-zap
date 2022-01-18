@@ -18,8 +18,8 @@ pub fn biguint_to_uint128(bui: &BigUint) -> StdResult<Uint128> {
     let digits = bui.to_u32_digits();
     let mut factor = Uint128::new(1u128);
     let mut ui = Uint128::zero();
-    for i in 0..digits.len() {
-        ui = ui.checked_add(Uint128::new(digits[i].into()).checked_mul(factor)?)?;
+    for digit in &digits {
+        ui = ui.checked_add(Uint128::new(u128::from(*digit)).checked_mul(factor)?)?;
         factor = factor.checked_mul(Uint128::new(POW_32))?;
     }
     Ok(ui)
@@ -83,7 +83,7 @@ pub fn handle_deposits(
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut msgs: Vec<CosmosMsg> = vec![];
     for deposit in claimed_deposits {
-        if let Some(msg) = handle_deposit(&deposit, sent_funds, sender_addr, contract_addr)? {
+        if let Some(msg) = handle_deposit(deposit, sent_funds, sender_addr, contract_addr)? {
             msgs.push(msg);
         }
     }

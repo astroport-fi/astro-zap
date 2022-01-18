@@ -142,10 +142,9 @@ fn assert_deposit_types(pair_assets: &AssetList, deposits: &AssetList) -> StdRes
 
 /// Assert that deposits must contain either exactly one or two assets
 fn assert_deposit_number(deposits: &AssetList) -> StdResult<()> {
-    let len = deposits.len();
-    if len < 1 || len > 2 {
+    if !(1..=2).contains(&deposits.len()) {
         return Err(StdError::generic_err(
-            format!("must deposit exactly 1 or 2 assets; received {}", len)
+            format!("must deposit exactly 1 or 2 assets; received {}", deposits.len())
         ));
     }
     Ok(())
@@ -156,15 +155,15 @@ fn assert_deposit_number(deposits: &AssetList) -> StdResult<()> {
 ///
 /// For details of the math involved, see `../../docs/astrozap.pdf`
 fn compute_offer_asset(pool_assets: &AssetList, user_assets: &AssetList) -> StdResult<Asset> {
-    let a_pool = Asset::from(pool_assets[0].clone());
-    let b_pool = Asset::from(pool_assets[1].clone());
+    let a_pool = pool_assets[0].clone();
+    let b_pool = pool_assets[1].clone();
 
     let a_user = user_assets
-        .find(&a_pool.info.clone().into())
+        .find(&a_pool.info)
         .cloned()
         .unwrap_or_else(|| Asset::new(a_pool.info.clone(), 0u128));
     let b_user = user_assets
-        .find(&b_pool.info.clone().into())
+        .find(&b_pool.info)
         .cloned()
         .unwrap_or_else(|| Asset::new(b_pool.info.clone(), 0u128));
 
@@ -196,9 +195,9 @@ fn compute_offer_asset(pool_assets: &AssetList, user_assets: &AssetList) -> StdR
     let offer_amount = bigint_to_uint128(&q.solve())?;
 
     let offer_asset_info = if share_a > share_b {
-        a_pool.info.clone()
+        a_pool.info
     } else {
-        b_pool.info.clone()
+        b_pool.info
     };
 
     Ok(Asset::new(offer_asset_info, offer_amount))
