@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { LCDClient, MnemonicKey, MsgExecuteContract, Wallet } from "@terra-money/terra.js";
+import { LCDClient, MnemonicKey, Wallet, MsgExecuteContract } from "@terra-money/terra.js";
 import { waitUntilKeypress, sendTransaction } from "./3_helpers";
 
 const ASTROZAP_ADDR = "terra1s7wn47w5kcvn8yefj8y2ffev62a3yureaz4lvc";
@@ -40,14 +40,14 @@ if (!process.env.MNEMONIC) {
               info: {
                 native: "uusd",
               },
-              amount: "1000000",
+              amount: "10000000",
             },
           ],
           minimum_received: undefined,
         },
       },
       {
-        uusd: 1000000,
+        uusd: 10000000,
       },
     ),
   ]);

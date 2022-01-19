@@ -2,8 +2,9 @@ import * as fs from "fs";
 import {
   isTxError,
   Msg,
-  MsgInstantiateContract,
   MsgStoreCode,
+  MsgInstantiateContract,
+  MsgMigrateContract,
   Wallet,
   LCDClient,
 } from "@terra-money/terra.js";
@@ -68,4 +69,25 @@ export async function instantiateContract(
     new MsgInstantiateContract(deployer.key.accAddress, deployer.key.accAddress, codeId, msg),
   ]);
   return result.logs[0].eventsByType.instantiate_contract.contract_address[0];
+}
+
+/**
+ * Migrate a contract using the given code ID, return txhash
+ */
+export async function migrateContract(
+  terra: LCDClient, 
+  deployer: Wallet, 
+  contractAddr: string, 
+  codeId: number, 
+  msg?: object,
+) {
+  const result = await sendTransaction(terra, deployer, [
+    new MsgMigrateContract(
+      deployer.key.accAddress, 
+      contractAddr, 
+      codeId,
+      msg ? msg : {}
+    )
+  ]);
+  return result.txhash;
 }
