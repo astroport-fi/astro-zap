@@ -1,6 +1,8 @@
+use std::str::FromStr;
+
 use cosmwasm_std::{
-    to_binary, Addr, Coin, CosmosMsg, Event, QuerierWrapper, QueryRequest, Reply, StdError,
-    StdResult, SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg, WasmQuery,
+    to_binary, Addr, Coin, CosmosMsg, Decimal, Event, QuerierWrapper, QueryRequest, Reply,
+    StdError, StdResult, SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg, WasmQuery,
 };
 use cw20::Cw20ExecuteMsg;
 
@@ -8,7 +10,7 @@ use cw_asset::{Asset, AssetInfo, AssetList};
 use cw_bigint::{BigInt, BigUint};
 
 use astroport::asset::PairInfo;
-use astroport::pair::{ExecuteMsg, PoolResponse, SimulationResponse};
+use astroport::pair::{ExecuteMsg, PoolResponse, SimulationResponse, MAX_ALLOWED_SLIPPAGE};
 
 const POW_32: u128 = 2u128.pow(32);
 
@@ -122,14 +124,18 @@ pub fn query_simulation(
 
 /// Generate a submessage for swapping an asset using an Astroport pool
 ///
-/// NOTE: We use reply_id: 1
+/// NOTE: 
+/// 
+/// - We use reply_id: 1
+/// - We use Astroport's maximum allowed slippage. To limit slippage, the frontend should calculate
+///   and supply the `minimum_received` parameter. 
 pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<SubMsg> {
     let msg = match &offer_asset.info {
         AssetInfo::Cw20(_) => offer_asset.send_msg(
             pair_addr,
             to_binary(&astroport::pair::Cw20HookMsg::Swap {
                 belief_price: None,
-                max_spread: None,
+                max_spread: Some(Decimal::from_str(MAX_ALLOWED_SLIPPAGE)?),
                 to: None,
             })?,
         )?,
@@ -138,12 +144,12 @@ pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<Sub
             msg: to_binary(&ExecuteMsg::Swap {
                 offer_asset: offer_asset.clone().into(),
                 belief_price: None,
-                max_spread: None,
+                max_spread: Some(Decimal::from_str(MAX_ALLOWED_SLIPPAGE)?),
                 to: None,
             })?,
             funds: vec![Coin {
                 denom: denom.clone(),
-                amount: offer_asset.amount, // NOTE:
+                amount: offer_asset.amount,
             }],
         }),
     };

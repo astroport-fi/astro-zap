@@ -82,14 +82,15 @@ fn enter(
     // that will be sent out from available assets
     // Then, deduct the offer asset from the user's available assets (as they will be sent out)
     let offer_asset = compute_offer_asset(&pool_assets, &deposits)?;
-    deposits.deduct(&offer_asset)?;
+    let mut available_assets = deposits.clone();
+    available_assets.deduct(&offer_asset)?;
 
     // Cache necessary data so that they can be accessed when handling reply
     let cache = CacheData {
         user_addr: info.sender,
         pair_addr: pair_addr.clone(),
         liquidity_token_addr: pair_info.liquidity_token,
-        assets: deposits.clone(),
+        assets: available_assets,
         minimum_received,
     };
     CACHE.save(deps.storage, &cache)?;

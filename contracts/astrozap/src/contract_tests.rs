@@ -1,7 +1,7 @@
 use cosmwasm_std::testing::{mock_env, mock_info, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Coin, ContractResult, CosmosMsg, Event, OwnedDeps, Reply,
-    ReplyOn, StdError, SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg,
+    ReplyOn, StdError, SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg, Decimal
 };
 
 use cw_asset::{Asset, AssetInfo, AssetList};
@@ -253,7 +253,7 @@ fn should_enter_native_native_pool() {
                 msg: to_binary(&astroport::pair::ExecuteMsg::Swap {
                     offer_asset: Asset::native("uusd", 50064546170u128).into(),
                     belief_price: None,
-                    max_spread: None,
+                    max_spread: Some(Decimal::from_ratio(1u128, 2u128)),
                     to: None,
                 })
                 .unwrap(),
@@ -413,7 +413,7 @@ fn should_enter_cw20_native_pool() {
                     amount: Uint128::new(336933122413),
                     msg: to_binary(&astroport::pair::Cw20HookMsg::Swap {
                         belief_price: None,
-                        max_spread: None,
+                        max_spread: Some(Decimal::from_ratio(1u128, 2u128)),
                         to: None,
                     })
                     .unwrap()
