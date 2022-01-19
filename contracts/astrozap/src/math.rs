@@ -13,13 +13,6 @@ const COMMISSION_RATE_BPS: u64 = 30;
 /// Equation describing the relation between the optimal swap amount (x) and the asset amounts. It
 /// is a quadratic equation of the form `a * x^2 + b * x + c = 0` where `a, b, c >= 0`. For details,
 /// see the document `docs/astrozap.pdf`
-///
-/// NOTE: Do we really need Uint512 or will Uint256 do? The maximum value we may reach is
-///   (2^128 - 1)^3 ~= 1e+115
-/// while the maximum amount Decimal256 supports is
-///   2^256 - 1 ~= 1e+77
-/// This being said, overflow should be very rare unless for pools with ultra-low-price shitcoins,
-/// and even in such cases we will safely return with error
 pub struct Quadratic {
     /// Coefficient of the quadratic term
     pub a: BigInt,
