@@ -22,7 +22,7 @@ export class Equation {
     offer_user: BigNumberish,
     offer_pool: BigNumberish,
     ask_user: BigNumberish,
-    ask_pool: BigNumberish
+    ask_pool: BigNumberish,
   ) {
     offer_user = new BN(offer_user);
     offer_pool = new BN(offer_pool);
@@ -77,7 +77,9 @@ export class Equation {
       x = xPrev.sub(val.div(derivVal));
 
       console.log(
-        `iteration ${i + 1}, x = ${x.toString()}, val = ${val.toString()}, derivVal = ${derivVal.toString()}`
+        `iteration ${
+          i + 1
+        }, x = ${x.toString()}, val = ${val.toString()}, derivVal = ${derivVal.toString()}`,
       );
 
       if (x.toNumber() == xPrev.toNumber()) {
