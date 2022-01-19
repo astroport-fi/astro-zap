@@ -4,16 +4,15 @@ use cosmwasm_std::{
 };
 use cw20::Cw20ExecuteMsg;
 
-use num_bigint::{BigInt, BigUint};
-
 use cw_asset::{Asset, AssetInfo, AssetList};
+use cw_bigint::{BigInt, BigUint};
 
 use astroport::asset::PairInfo;
 use astroport::pair::{ExecuteMsg, PoolResponse, SimulationResponse};
 
 const POW_32: u128 = 2u128.pow(32);
 
-/// Convert a num_bigint::BigUint to cosmwasm_std::Uint128
+/// Convert a cw_bigint::BigUint to cosmwasm_std::Uint128
 pub fn biguint_to_uint128(bui: &BigUint) -> StdResult<Uint128> {
     let digits = bui.to_u32_digits();
     let mut factor = Uint128::new(1u128);

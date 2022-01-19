@@ -1,4 +1,4 @@
-use num_bigint::BigInt;
+use cw_bigint::BigInt;
 
 /// The maximum number of iterations to do when solving the quadratic equation
 const MAX_ITERATIONS: usize = 32;
