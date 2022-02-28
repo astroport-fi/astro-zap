@@ -2,7 +2,7 @@
 
 Enter Astroport XYK pools with any combination of the two assets
 
-For an overview of the math behind zapping, see [this explainer](./docs/astrozap.pdf)
+For an overview of the math behind zapping, see [this explainer](./docs/astrozap.pdf).
 
 ## Development
 
@@ -43,4 +43,4 @@ ts-node 4_deploy.ts --network {mainnet|testnet} [--code-id codeId]
 
 ## License
 
-Contents of this repository are open source under [GNU Public License v3](./LICENSE)
+Contents of this repository are open-sourced under [GNU Public License v3](./LICENSE)
