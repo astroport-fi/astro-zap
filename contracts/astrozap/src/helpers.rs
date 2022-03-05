@@ -122,14 +122,19 @@ pub fn query_simulation(
     }))
 }
 
-/// Generate a submessage for swapping an asset using an Astroport pool
+/// Generate a submessage for swapping an asset using an Astroport pool, and deduct the asset to be
+/// offered from the list of available assets.
 ///
 /// NOTE: 
 /// 
 /// - We use reply_id: 1
 /// - We use Astroport's maximum allowed slippage. To limit slippage, the frontend should calculate
 ///   and supply the `minimum_received` parameter. 
-pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<SubMsg> {
+pub fn build_swap_submsgs(
+    pair_addr: &Addr, 
+    available_assets: &mut AssetList, 
+    offer_asset: &Asset,
+) -> StdResult<Vec<SubMsg>> {
     let msg = match &offer_asset.info {
         AssetInfo::Cw20(_) => offer_asset.send_msg(
             pair_addr,
@@ -153,20 +158,25 @@ pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<Sub
             }],
         }),
     };
-    Ok(SubMsg::reply_on_success(msg, 1))
+
+    available_assets.deduct(offer_asset)?;
+
+    Ok(vec![SubMsg::reply_on_success(msg, 1)])
 }
 
-/// Generate submessages for providing liqudity to an Astroport pool
+/// Generate submessages for providing liqudity to an Astroport pool, and deduct the assets to be
+/// provided from the list of available assets.
 ///
 /// NOTE: We use reply_id: 2
 pub fn build_provide_liquidity_submsgs(
     pair_addr: &Addr,
-    assets: &AssetList,
+    available_assets: &mut AssetList,
 ) -> StdResult<Vec<SubMsg>> {
     let mut submsgs: Vec<SubMsg> = vec![];
     let mut funds: Vec<Coin> = vec![];
+    let mut assets_to_provide = AssetList::new();
 
-    for asset in assets {
+    for asset in available_assets.clone().into_iter() {
         match &asset.info {
             AssetInfo::Cw20(contract_addr) => submsgs.push(SubMsg::new(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
@@ -182,13 +192,16 @@ pub fn build_provide_liquidity_submsgs(
                 amount: asset.amount,
             }),
         }
+
+        available_assets.deduct(asset)?;
+        assets_to_provide.add(asset)?;
     }
 
     submsgs.push(SubMsg::reply_on_success(
         WasmMsg::Execute {
             contract_addr: pair_addr.to_string(),
             msg: to_binary(&ExecuteMsg::ProvideLiquidity {
-                assets: assets.try_into_legacy()?,
+                assets: assets_to_provide.try_into_legacy()?,
                 slippage_tolerance: None,
                 auto_stake: None,
                 receiver: None,

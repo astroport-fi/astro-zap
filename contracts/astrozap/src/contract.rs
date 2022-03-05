@@ -10,7 +10,7 @@ use astroport::factory::PairType;
 use cw_asset::{Asset, AssetInfo, AssetList};
 
 use crate::helpers::{
-    build_provide_liquidity_submsgs, build_swap_submsg, event_contains_attr, handle_deposits,
+    build_provide_liquidity_submsgs, build_swap_submsgs, event_contains_attr, handle_deposits,
     query_pair, query_pool, query_simulation, unwrap_reply, bigint_to_uint128
 };
 use crate::math::Quadratic;
@@ -82,43 +82,35 @@ fn enter(
     // that will be sent out from available assets
     // Then, deduct the offer asset from the user's available assets (as they will be sent out)
     let offer_asset = compute_offer_asset(&pool_assets, &deposits)?;
-    let mut available_assets = deposits.clone();
-    available_assets.deduct(&offer_asset)?;
+
+    // Build submsgs
+    //
+    // If no swap is needed (i.e. offer amount is calculated to be zero), we simply provide the
+    // liquidity, and deduct the assets to be provided from the list of available assets
+    //
+    // If a swap is needed, we execute the swap, and deduct the offer asset from the list of
+    // available assets
+    let submsgs = if offer_asset.amount.is_zero() {
+        build_provide_liquidity_submsgs(&pair_addr, &mut deposits)?
+    } else {
+        build_swap_submsgs(&pair_addr, &mut deposits, &offer_asset)?
+    };
 
     // Cache necessary data so that they can be accessed when handling reply
     let cache = CacheData {
         user_addr: info.sender,
         pair_addr: pair_addr.clone(),
         liquidity_token_addr: pair_info.liquidity_token,
-        assets: available_assets,
+        assets: deposits.clone(),
         minimum_received,
     };
     CACHE.save(deps.storage, &cache)?;
 
-    // If no swap is needed (i.e. offer amount is calculated to be zero), we simply provide the
-    // liquidity; else, we execute the swap
-    //
-    // NOTE: We will do slippage check against `minimum_received` in the end, so no need to provide
-    // slippage-related parameters here
-    let res = if offer_asset.amount.is_zero() {
-        Response::new()
-            .add_messages(deposit_msgs)
-            .add_submessages(build_provide_liquidity_submsgs(&pair_addr, &deposits)?)
-            .add_attribute("action", "astrozap/execute/enter")
-            .add_attribute("assets_deposited", deposits.to_string())
-            .add_attribute("asset_offered", "none")
-            .add_attribute("assets_provided", deposits.to_string())
-    } else {
-        Response::new()
-            .add_messages(deposit_msgs)
-            .add_submessage(build_swap_submsg(&pair_addr, &offer_asset)?)
-            .add_attribute("action", "astrozap/execute/enter")
-            .add_attribute("assets_deposited", deposits.to_string())
-            .add_attribute("asset_offered", offer_asset.to_string())
-            .add_attribute("assets_provided", "none")
-    };
-
-    Ok(res)
+    Ok(Response::new()
+        .add_messages(deposit_msgs)
+        .add_submessages(submsgs)
+        .add_attribute("action", "astrozap/execute/enter")
+        .add_attribute("assets_deposited", deposits.to_string()))
 }
 
 /// Assert the given Astroport pair is of the XYK type
@@ -249,14 +241,18 @@ fn after_swap(deps: DepsMut, res: SubMsgExecutionResponse) -> StdResult<Response
     let mut cache = CACHE.load(deps.storage)?;
     cache.assets.add(&returned_asset)?;
 
+    // Build messages to provide assets to the DEX pool, and deduct the assets to be provided from
+    // the list of available assets
+    let submsgs = build_provide_liquidity_submsgs(
+        &cache.pair_addr,
+        &mut cache.assets,
+    )?;
+    CACHE.save(deps.storage, &cache)?;
+
     Ok(Response::new()
-        .add_submessages(build_provide_liquidity_submsgs(
-            &cache.pair_addr,
-            &cache.assets,
-        )?)
+        .add_submessages(submsgs)
         .add_attribute("action", "astrozap/reply/after_swap")
-        .add_attribute("asset_returned", returned_asset.to_string())
-        .add_attribute("assets_provided", &cache.assets.to_string()))
+        .add_attribute("asset_returned", returned_asset.to_string()))
 }
 
 fn after_provide_liquidity(deps: DepsMut, res: SubMsgExecutionResponse) -> StdResult<Response> {
@@ -276,7 +272,7 @@ fn after_provide_liquidity(deps: DepsMut, res: SubMsgExecutionResponse) -> StdRe
 
     let share_amount = Uint128::from_str(&share_str)?;
 
-    let cache = CACHE.load(deps.storage)?;
+    let mut cache = CACHE.load(deps.storage)?;
     CACHE.remove(deps.storage);
 
     if let Some(minimum_received) = cache.minimum_received {
@@ -288,9 +284,10 @@ fn after_provide_liquidity(deps: DepsMut, res: SubMsgExecutionResponse) -> StdRe
     }
 
     let shares_minted = Asset::cw20(cache.liquidity_token_addr, share_amount);
+    cache.assets.add(&shares_minted)?;
 
     Ok(Response::new()
-        .add_message(shares_minted.transfer_msg(&cache.user_addr)?)
+        .add_messages(cache.assets.transfer_msgs(&cache.user_addr)?)
         .add_attribute("action", "astrozap/reply/after_providing_liquidity")
         .add_attribute("shares_minted", shares_minted.to_string()))
 }
