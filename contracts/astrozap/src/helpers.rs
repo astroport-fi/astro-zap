@@ -51,7 +51,7 @@ pub fn event_contains_attr(event: &Event, key: &str, value: &str) -> bool {
 /// - For native, assert the declared has indeed been transferred along with the message, return `None`
 pub fn handle_deposit(
     claimed_deposit: &Asset,
-    sent_funds: &AssetList,
+    received_coins: &mut AssetList,
     sender_addr: &Addr,
     contract_addr: &Addr,
 ) -> StdResult<Option<CosmosMsg>> {
@@ -60,34 +60,53 @@ pub fn handle_deposit(
             claimed_deposit.transfer_from_msg(sender_addr, contract_addr)?,
         )),
         AssetInfo::Native(_) => {
-            let sent_fund = sent_funds.find(&claimed_deposit.info).ok_or_else(|| {
-                StdError::generic_err(
+            // We need to have `received_coin` as a clone here to prevent the `cannot borrow as 
+            // mutable because it is also borrowed as immutable` error
+            let received_coin = received_coins
+                .find(&claimed_deposit.info)
+                .ok_or_else(|| StdError::generic_err(
                     format!("invalid deposit: expected {}, received none", claimed_deposit)
-                )
-            })?;
-            if sent_fund != claimed_deposit {
+                ))?
+                .clone();
+
+            if received_coin != *claimed_deposit {
                 return Err(StdError::generic_err(
-                    format!("invalid deposit: expected {}, received {}", claimed_deposit, sent_fund.amount)
+                    format!("invalid deposit: expected {}, received {}", claimed_deposit, received_coin.amount)
                 ));
             }
+
+            received_coins.deduct(&received_coin)?;
+
             Ok(None)
         }
     }
 }
 
 // Handle multiple deposits by invoking `handle_deposit` on each of the claimed deposit
+//
+// This function takes a mutable asset list `received_coins` which is all the native tokens the user
+// sent to the contract. For every native coin depsosit we processed, we deduct it from this list.
+// At the end, we check whether this list is empty. If not, it means the user has sent extra funds,
+// and we throw an error. 
 pub fn handle_deposits(
     claimed_deposits: &AssetList,
-    sent_funds: &AssetList,
+    received_coins: &mut AssetList,
     sender_addr: &Addr,
     contract_addr: &Addr,
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut msgs: Vec<CosmosMsg> = vec![];
     for deposit in claimed_deposits {
-        if let Some(msg) = handle_deposit(deposit, sent_funds, sender_addr, contract_addr)? {
+        if let Some(msg) = handle_deposit(deposit, received_coins, sender_addr, contract_addr)? {
             msgs.push(msg);
         }
     }
+
+    if received_coins.len() > 0 {
+        return Err(StdError::generic_err(
+            format!("extra deposit received: {}", received_coins.to_string())
+        ))
+    }
+
     Ok(msgs)
 }
 
@@ -122,14 +141,19 @@ pub fn query_simulation(
     }))
 }
 
-/// Generate a submessage for swapping an asset using an Astroport pool
+/// Generate a submessage for swapping an asset using an Astroport pool, and deduct the asset to be
+/// offered from the list of available assets.
 ///
 /// NOTE: 
 /// 
 /// - We use reply_id: 1
 /// - We use Astroport's maximum allowed slippage. To limit slippage, the frontend should calculate
 ///   and supply the `minimum_received` parameter. 
-pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<SubMsg> {
+pub fn build_swap_submsgs(
+    pair_addr: &Addr, 
+    available_assets: &mut AssetList, 
+    offer_asset: &Asset,
+) -> StdResult<Vec<SubMsg>> {
     let msg = match &offer_asset.info {
         AssetInfo::Cw20(_) => offer_asset.send_msg(
             pair_addr,
@@ -153,20 +177,25 @@ pub fn build_swap_submsg(pair_addr: &Addr, offer_asset: &Asset) -> StdResult<Sub
             }],
         }),
     };
-    Ok(SubMsg::reply_on_success(msg, 1))
+
+    available_assets.deduct(offer_asset)?;
+
+    Ok(vec![SubMsg::reply_on_success(msg, 1)])
 }
 
-/// Generate submessages for providing liqudity to an Astroport pool
+/// Generate submessages for providing liqudity to an Astroport pool, and deduct the assets to be
+/// provided from the list of available assets.
 ///
 /// NOTE: We use reply_id: 2
 pub fn build_provide_liquidity_submsgs(
     pair_addr: &Addr,
-    assets: &AssetList,
+    available_assets: &mut AssetList,
 ) -> StdResult<Vec<SubMsg>> {
     let mut submsgs: Vec<SubMsg> = vec![];
     let mut funds: Vec<Coin> = vec![];
+    let mut assets_to_provide = AssetList::new();
 
-    for asset in assets {
+    for asset in available_assets.clone().into_iter() {
         match &asset.info {
             AssetInfo::Cw20(contract_addr) => submsgs.push(SubMsg::new(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
@@ -182,13 +211,16 @@ pub fn build_provide_liquidity_submsgs(
                 amount: asset.amount,
             }),
         }
+
+        available_assets.deduct(asset)?;
+        assets_to_provide.add(asset)?;
     }
 
     submsgs.push(SubMsg::reply_on_success(
         WasmMsg::Execute {
             contract_addr: pair_addr.to_string(),
             msg: to_binary(&ExecuteMsg::ProvideLiquidity {
-                assets: assets.try_into_legacy()?,
+                assets: assets_to_provide.try_into_legacy()?,
                 slippage_tolerance: None,
                 auto_stake: None,
                 receiver: None,

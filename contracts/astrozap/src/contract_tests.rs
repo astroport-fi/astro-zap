@@ -214,6 +214,35 @@ fn should_reject_missing_deposit() {
 }
 
 #[test]
+fn should_reject_extra_deposit() {
+    let mut deps = setup_test();
+
+    let msg = ExecuteMsg::Enter {
+        pair: String::from("luna_ust_pair"),
+        deposits: AssetList::from(vec![Asset::native("uluna", 12345u128)]).into(),
+        minimum_received: None,
+    };
+    // User claims to deposit 12345 uluna, but also deposit more 
+    let actual_deposits = &[
+        Coin::new(12345, "uluna"),
+        Coin::new(69420, "uusd"),
+        Coin::new(88888, "uatom"),
+    ];
+    let err = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info("alice", actual_deposits),
+        msg.clone(),
+    );
+    assert_eq!(
+        err,
+        Err(StdError::generic_err(
+            "extra deposit received: native:uusd:69420,native:uatom:88888"
+        ))
+    );
+}
+
+#[test]
 fn should_enter_native_native_pool() {
     let mut deps = setup_test();
 
