@@ -1,6 +1,6 @@
 [package]
 name = "astrozap"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["larry <larry@delphidigital.io>"]
 edition = "2018"
 license = "GPL-3.0-or-later"
@@ -18,12 +18,12 @@ lto = true
 overflow-checks = true
 
 [dependencies]
-astroport = "0.3.1"
-cosmwasm-std = "0.16.0"
-cw20 = "0.9.1"
-cw-asset = { version = "0.3.4", features = ["legacy"] }
-cw-bigint = { git = "https://github.com/larry0x/cw-bigint" } # we use a forked version of `num-bigint` with float operators removed
-cw-storage-plus = "0.9.1"
+astroport = "^1.0"
+cosmwasm-std = "^0.16"
+cw20 = "^0.9"
+cw-asset = { version = "^1.0", features = ["legacy"] }
+cw-bigint = { version = "0.4.3", git = "https://github.com/astroport-fi/cw-bigint" } # `cw-bigint` is a fork of `num-bigint` with float operators removed
+cw-storage-plus = "^0.9"
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 

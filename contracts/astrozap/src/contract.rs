@@ -40,7 +40,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             env,
             info,
             api.addr_validate(&pair)?,
-            deposits.check(api)?,
+            deposits.check(api, None)?,
             minimum_received,
         ),
     }
@@ -299,7 +299,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::SimulateEnter { pair, deposits } => to_binary(&query_simulate_enter(
             deps,
             api.addr_validate(&pair)?,
-            deposits.check(api)?,
+            deposits.check(api, None)?,
         )?),
     }
 }
