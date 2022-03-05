@@ -117,7 +117,7 @@ fn enter(
 fn assert_pair_type(pair_type: &PairType) -> StdResult<()> {
      match pair_type {
          PairType::Xyk {} => Ok(()),
-         pt => Err(StdError::generic_err(format!("unsupported pair type: {}", pt.to_string()))),
+         pt => Err(StdError::generic_err(format!("unsupported pair type: {}", pt))),
      }
 }
 

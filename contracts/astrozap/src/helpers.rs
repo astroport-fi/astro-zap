@@ -103,7 +103,7 @@ pub fn handle_deposits(
 
     if received_coins.len() > 0 {
         return Err(StdError::generic_err(
-            format!("extra deposit received: {}", received_coins.to_string())
+            format!("extra deposit received: {}", received_coins)
         ))
     }
 
