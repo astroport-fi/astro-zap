@@ -73,7 +73,7 @@ fn enter(
     // sent alone with `info.funds`
     let deposit_msgs = handle_deposits(
         &deposits,
-        &info.funds.into(),
+        &mut info.funds.into(),
         &info.sender,
         &env.contract.address,
     )?;

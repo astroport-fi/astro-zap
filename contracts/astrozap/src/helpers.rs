@@ -51,7 +51,7 @@ pub fn event_contains_attr(event: &Event, key: &str, value: &str) -> bool {
 /// - For native, assert the declared has indeed been transferred along with the message, return `None`
 pub fn handle_deposit(
     claimed_deposit: &Asset,
-    sent_funds: &AssetList,
+    received_coins: &mut AssetList,
     sender_addr: &Addr,
     contract_addr: &Addr,
 ) -> StdResult<Option<CosmosMsg>> {
@@ -60,34 +60,53 @@ pub fn handle_deposit(
             claimed_deposit.transfer_from_msg(sender_addr, contract_addr)?,
         )),
         AssetInfo::Native(_) => {
-            let sent_fund = sent_funds.find(&claimed_deposit.info).ok_or_else(|| {
-                StdError::generic_err(
+            // We need to have `received_coin` as a clone here to prevent the `cannot borrow as 
+            // mutable because it is also borrowed as immutable` error
+            let received_coin = received_coins
+                .find(&claimed_deposit.info)
+                .ok_or_else(|| StdError::generic_err(
                     format!("invalid deposit: expected {}, received none", claimed_deposit)
-                )
-            })?;
-            if sent_fund != claimed_deposit {
+                ))?
+                .clone();
+
+            if received_coin != *claimed_deposit {
                 return Err(StdError::generic_err(
-                    format!("invalid deposit: expected {}, received {}", claimed_deposit, sent_fund.amount)
+                    format!("invalid deposit: expected {}, received {}", claimed_deposit, received_coin.amount)
                 ));
             }
+
+            received_coins.deduct(&received_coin)?;
+
             Ok(None)
         }
     }
 }
 
 // Handle multiple deposits by invoking `handle_deposit` on each of the claimed deposit
+//
+// This function takes a mutable asset list `received_coins` which is all the native tokens the user
+// sent to the contract. For every native coin depsosit we processed, we deduct it from this list.
+// At the end, we check whether this list is empty. If not, it means the user has sent extra funds,
+// and we throw an error. 
 pub fn handle_deposits(
     claimed_deposits: &AssetList,
-    sent_funds: &AssetList,
+    received_coins: &mut AssetList,
     sender_addr: &Addr,
     contract_addr: &Addr,
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut msgs: Vec<CosmosMsg> = vec![];
     for deposit in claimed_deposits {
-        if let Some(msg) = handle_deposit(deposit, sent_funds, sender_addr, contract_addr)? {
+        if let Some(msg) = handle_deposit(deposit, received_coins, sender_addr, contract_addr)? {
             msgs.push(msg);
         }
     }
+
+    if received_coins.len() > 0 {
+        return Err(StdError::generic_err(
+            format!("extra deposit received: {}", received_coins.to_string())
+        ))
+    }
+
     Ok(msgs)
 }
 
